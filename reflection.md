@@ -42,13 +42,25 @@ Other observations from the review (no code changes needed):
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers three constraints, ranked by importance:
+
+1. **Mandatory status** — Tasks flagged `is_mandatory` are always scheduled before optional tasks, regardless of priority. This ensures critical care (medication, feeding) never gets bumped by a nice-to-have activity.
+2. **Priority (high/medium/low)** — Within each group (mandatory and optional), tasks are sorted high → medium → low using a stable sort so ties preserve insertion order.
+3. **Time budget** — The owner's `available_minutes` is a hard ceiling. The greedy algorithm fills time sequentially and excludes any task that doesn't fit in the remaining window.
+
+I decided mandatory status should outrank priority because in pet care, a mandatory low-priority task (e.g., giving daily medication — quick but essential) should never be dropped in favor of an optional high-priority task (e.g., a long training session). Time budget is the final gate because it's a physical constraint that can't be negotiated.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+**Tradeoff: Greedy sequential placement vs. knapsack optimization.**
+
+The scheduler uses a greedy algorithm — it places tasks one at a time in priority order until time runs out. A knapsack algorithm could theoretically pack *more total value* into the time budget by skipping a long high-priority task to fit two shorter medium-priority ones.
+
+I chose greedy because it produces **predictable, explainable results**. If a pet owner sees their highest-priority task excluded in favor of two lower-priority ones, that feels wrong — even if it's mathematically optimal. The greedy approach guarantees that the most important tasks are always attempted first, which matches how a human would manually plan their day.
+
+**Tradeoff: Conflict detection checks overlapping duration ranges, not just exact start times.**
+
+The `detect_conflicts()` method compares every pair of scheduled tasks to see if their `[start_minute, end_minute)` ranges overlap. This is O(n²) which is fine for a daily schedule (~10-20 tasks), but would need optimization (e.g., sorting by start time first) for larger task sets. The tradeoff is simplicity and correctness over performance — reasonable given the scale of a pet care app.
 
 ---
 

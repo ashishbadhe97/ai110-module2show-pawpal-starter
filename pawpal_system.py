@@ -1,6 +1,7 @@
 """PawPal+ Backend System — Core classes for pet care scheduling."""
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Optional
 
 
@@ -13,6 +14,7 @@ class Task:
 
     VALID_PRIORITIES = ("high", "medium", "low")
     VALID_CATEGORIES = ("health", "exercise", "feeding", "grooming", "enrichment", "other")
+    VALID_FREQUENCIES = ("once", "daily", "weekly")
 
     def __init__(
         self,
@@ -22,6 +24,8 @@ class Task:
         category: str = "other",
         is_mandatory: bool = False,
         frequency: str = "daily",
+        scheduled_time: Optional[str] = None,
+        due_date: Optional[date] = None,
     ):
         if priority not in self.VALID_PRIORITIES:
             raise ValueError(f"Invalid priority '{priority}'. Must be one of {self.VALID_PRIORITIES}")
@@ -29,6 +33,8 @@ class Task:
             raise ValueError(f"Invalid category '{category}'. Must be one of {self.VALID_CATEGORIES}")
         if duration_minutes <= 0:
             raise ValueError("duration_minutes must be positive")
+        if scheduled_time is not None:
+            self._validate_time_format(scheduled_time)
 
         self.title = title
         self.duration_minutes = duration_minutes
@@ -36,15 +42,57 @@ class Task:
         self.category = category
         self.is_mandatory = is_mandatory
         self.frequency = frequency
+        self.scheduled_time = scheduled_time  # preferred time in "HH:MM" format
+        self.due_date = due_date or date.today()
         self.is_complete = False
 
-    def mark_complete(self) -> None:
-        """Mark this task as completed."""
+    @staticmethod
+    def _validate_time_format(time_str: str) -> None:
+        """Validate that a string is in HH:MM format."""
+        parts = time_str.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid time format '{time_str}'. Use HH:MM.")
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError
+        except ValueError:
+            raise ValueError(f"Invalid time '{time_str}'. Hours 0-23, minutes 0-59.")
+
+    @staticmethod
+    def time_to_minutes(time_str: str) -> int:
+        """Convert 'HH:MM' to total minutes from midnight for sorting."""
+        h, m = time_str.split(":")
+        return int(h) * 60 + int(m)
+
+    def mark_complete(self) -> "Optional[Task]":
+        """Mark this task as completed. Returns a new Task for the next occurrence if recurring."""
         self.is_complete = True
+        return self._create_next_occurrence()
 
     def mark_incomplete(self) -> None:
         """Reset this task to incomplete."""
         self.is_complete = False
+
+    def _create_next_occurrence(self) -> "Optional[Task]":
+        """Create the next occurrence of a recurring task, or None if non-recurring."""
+        if self.frequency == "daily":
+            next_date = self.due_date + timedelta(days=1)
+        elif self.frequency == "weekly":
+            next_date = self.due_date + timedelta(weeks=1)
+        else:
+            return None
+
+        return Task(
+            title=self.title,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            category=self.category,
+            is_mandatory=self.is_mandatory,
+            frequency=self.frequency,
+            scheduled_time=self.scheduled_time,
+            due_date=next_date,
+        )
 
     def __repr__(self) -> str:
         status = "✓" if self.is_complete else "○"
@@ -80,6 +128,16 @@ class Pet:
     def pending_tasks(self) -> list[Task]:
         """Return only incomplete tasks."""
         return [t for t in self.tasks if not t.is_complete]
+
+    def complete_task(self, title: str) -> "Optional[Task]":
+        """Mark a task complete and auto-schedule next occurrence if recurring."""
+        for task in self.tasks:
+            if task.title == title and not task.is_complete:
+                next_task = task.mark_complete()
+                if next_task is not None:
+                    self.tasks.append(next_task)
+                return next_task
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +199,7 @@ class Schedule:
         self.owner = owner
         self.scheduled_tasks: list[ScheduledTask] = []
         self.excluded_tasks: list[tuple[Task, str, str]] = []  # (task, pet_name, reason)
+        self.conflicts: list[str] = []  # conflict warning messages
         self.total_minutes_used: int = 0
         self.total_minutes_available: int = owner.available_minutes
 
@@ -175,6 +234,13 @@ class Schedule:
         lines.append(f"  Time budget: {self.total_minutes_used}/{self.total_minutes_available} min "
                       f"({self.utilization():.0f}% utilized)")
         lines.append("=" * 60)
+
+        # Conflict warnings
+        if self.conflicts:
+            lines.append("")
+            lines.append("  ⚡ CONFLICTS DETECTED:")
+            for conflict in self.conflicts:
+                lines.append(f"    ⚠ {conflict}")
 
         if not self.scheduled_tasks:
             lines.append("\n  No tasks scheduled.\n")
@@ -267,11 +333,62 @@ class Scheduler:
                               f"(needs {task.duration_minutes} min, only {remaining} min left)")
                 schedule.add_excluded(task, pet_name, reason)
 
+        # Detect conflicts from preferred scheduled_time fields
+        schedule.conflicts = self.detect_conflicts(schedule)
+
         return schedule
 
+    # --- Sorting methods ---
+
     def _sort_task_pairs(self, pairs: list[tuple[Task, str]]) -> list[tuple[Task, str]]:
-        """Sort task-pet pairs by priority (high → medium → low)."""
+        """Sort task-pet pairs by priority (high -> medium -> low)."""
         return sorted(pairs, key=lambda pair: self.PRIORITY_ORDER[pair[0].priority])
+
+    @staticmethod
+    def sort_by_time(tasks: list[Task]) -> list[Task]:
+        """Sort tasks by their preferred scheduled_time (HH:MM). Tasks without a time go last."""
+        def time_key(task: Task) -> int:
+            if task.scheduled_time is None:
+                return 9999  # no preferred time → end of list
+            return Task.time_to_minutes(task.scheduled_time)
+        return sorted(tasks, key=time_key)
+
+    # --- Filtering methods ---
+
+    @staticmethod
+    def filter_by_pet(tasks_with_pets: list[tuple[Task, str]], pet_name: str) -> list[tuple[Task, str]]:
+        """Filter task-pet pairs to only include tasks for a specific pet."""
+        return [(t, p) for t, p in tasks_with_pets if p == pet_name]
+
+    @staticmethod
+    def filter_by_status(tasks: list[Task], completed: bool = False) -> list[Task]:
+        """Filter tasks by completion status."""
+        return [t for t in tasks if t.is_complete == completed]
+
+    @staticmethod
+    def filter_by_category(tasks: list[Task], category: str) -> list[Task]:
+        """Filter tasks to only include a specific category."""
+        return [t for t in tasks if t.category == category]
+
+    # --- Conflict detection ---
+
+    @staticmethod
+    def detect_conflicts(schedule: "Schedule") -> list[str]:
+        """Check for overlapping time slots in scheduled tasks. Returns warning messages."""
+        conflicts = []
+        tasks = schedule.scheduled_tasks
+        for i in range(len(tasks)):
+            for j in range(i + 1, len(tasks)):
+                a, b = tasks[i], tasks[j]
+                # Two tasks conflict if their time ranges overlap
+                if a.start_minute < b.end_minute and b.start_minute < a.end_minute:
+                    time_a = f"{Schedule._format_time(a.start_minute)}-{Schedule._format_time(a.end_minute)}"
+                    time_b = f"{Schedule._format_time(b.start_minute)}-{Schedule._format_time(b.end_minute)}"
+                    conflicts.append(
+                        f"'{a.task.title}' ({a.pet_name}, {time_a}) overlaps with "
+                        f"'{b.task.title}' ({b.pet_name}, {time_b})"
+                    )
+        return conflicts
 
     def _generate_reasoning(self, task: Task, pet_name: str, position: int) -> str:
         """Build a human-readable explanation for scheduling this task."""

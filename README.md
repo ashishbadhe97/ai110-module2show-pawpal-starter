@@ -1,28 +1,32 @@
-# PawPal+ (Module 2 Project)
+# PawPal+ 🐾
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+A smart pet care management app built with Python and Streamlit. PawPal+ helps busy pet owners plan daily care routines by tracking tasks, prioritizing activities, and generating optimized schedules with clear reasoning.
 
-## Scenario
+## Features
 
-A busy pet owner needs help staying consistent with pet care. They want an assistant that can:
+- **Multi-pet management** — Add and manage multiple pets (dogs, cats, etc.) under one owner profile
+- **Smart task scheduling** — A greedy algorithm schedules tasks by mandatory status first, then priority (high → medium → low), fitting within your daily time budget
+- **Scheduling reasoning** — Every scheduled and excluded task comes with a human-readable explanation of *why* it was placed or dropped
+- **Time-based sorting** — Sort tasks by their preferred `HH:MM` time slot for chronological planning
+- **Filtering** — Filter tasks by pet, completion status, or category (health, exercise, feeding, grooming, enrichment)
+- **Recurring tasks** — Daily and weekly tasks auto-generate their next occurrence when marked complete, using Python's `timedelta`
+- **Conflict detection** — Detects overlapping time slots and displays warnings so owners can resolve scheduling collisions
+- **Utilization tracking** — See how much of your available time budget is used, with feedback on schedule density
 
-- Track pet care tasks (walks, feeding, meds, enrichment, grooming, etc.)
-- Consider constraints (time available, priority, owner preferences)
-- Produce a daily plan and explain why it chose that plan
+## Project Structure
 
-Your job is to design the system first (UML), then implement the logic in Python, then connect it to the Streamlit UI.
+```
+├── pawpal_system.py      # Backend logic — all classes and scheduling algorithm
+├── app.py                # Streamlit UI — connected to backend
+├── main.py               # CLI demo script — verifies logic independently
+├── tests/
+│   └── test_pawpal.py    # 30 pytest tests covering all features
+├── uml_final.md          # Final Mermaid.js class diagram
+├── reflection.md         # Design decisions and project reflection
+└── requirements.txt      # Dependencies (streamlit, pytest)
+```
 
-## What you will build
-
-Your final app should:
-
-- Let a user enter basic owner + pet info
-- Let a user add/edit tasks (duration + priority at minimum)
-- Generate a daily schedule/plan based on constraints and priorities
-- Display the plan clearly (and ideally explain the reasoning)
-- Include tests for the most important scheduling behaviors
-
-## Getting started
+## Getting Started
 
 ### Setup
 
@@ -32,23 +36,45 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+### Run the CLI demo
+
+```bash
+python main.py
+```
+
+### Run the Streamlit app
+
+```bash
+streamlit run app.py
+```
+
+### Run tests
+
+```bash
+python -m pytest tests/test_pawpal.py -v
+```
+
+## Architecture
+
+The system is built with six classes organized in three layers:
+
+| Layer | Classes | Responsibility |
+|-------|---------|---------------|
+| **Data models** | `Task`, `Pet`, `Owner` | Hold pet care data with validation |
+| **Schedule output** | `ScheduledTask`, `Schedule` | Represent the optimized daily plan |
+| **Engine** | `Scheduler` | Greedy algorithm + sorting, filtering, conflict detection |
+
+See [`uml_final.md`](uml_final.md) for the complete Mermaid.js class diagram.
+
 ## Smarter Scheduling
 
-PawPal+ includes several algorithmic features beyond basic task listing:
+The scheduler uses a **greedy algorithm** that:
 
-- **Priority-aware sorting** — Tasks are sorted by priority (high → medium → low) with mandatory tasks always scheduled first, using Python's `sorted()` with a lambda key.
-- **Time-based sorting** — `sort_by_time()` orders tasks by their preferred `HH:MM` scheduled time, with unscheduled tasks placed last.
-- **Filtering** — Filter tasks by pet name, completion status, or category to quickly find what you need.
-- **Recurring tasks** — Daily and weekly tasks automatically create their next occurrence (using `timedelta`) when marked complete, so care routines never fall through the cracks.
-- **Conflict detection** — The scheduler checks all scheduled task pairs for overlapping time ranges and returns warning messages instead of crashing, so owners can resolve conflicts manually.
-- **Greedy scheduling with reasoning** — A greedy algorithm fits tasks into the owner's available time budget, generating a human-readable explanation for each scheduling decision and each exclusion.
+1. Collects all pending tasks from the owner's pets
+2. Partitions into mandatory and optional groups
+3. Sorts each group by priority (stable sort)
+4. Places tasks sequentially into available time slots
+5. Generates reasoning for every scheduling decision
+6. Detects any time-slot conflicts and returns warnings
 
-### Suggested workflow
-
-1. Read the scenario carefully and identify requirements and edge cases.
-2. Draft a UML diagram (classes, attributes, methods, relationships).
-3. Convert UML into Python class stubs (no logic yet).
-4. Implement scheduling logic in small increments.
-5. Add tests to verify key behaviors.
-6. Connect your logic to the Streamlit UI in `app.py`.
-7. Refine UML so it matches what you actually built.
+**Tradeoff**: Greedy over knapsack — produces intuitive, priority-ordered results that match how a human would plan their day, even if it doesn't maximize total scheduled time.

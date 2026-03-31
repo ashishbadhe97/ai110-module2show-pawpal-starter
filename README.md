@@ -79,3 +79,6 @@ The scheduler uses a **greedy algorithm** that:
 
 **Tradeoff**: Greedy over knapsack — produces intuitive, priority-ordered results that match how a human would plan their day, even if it doesn't maximize total scheduled time.
 
+## 📸 Demo section
+
+![App Screenshot](app_image.png)

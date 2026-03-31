@@ -78,3 +78,4 @@ The scheduler uses a **greedy algorithm** that:
 6. Detects any time-slot conflicts and returns warnings
 
 **Tradeoff**: Greedy over knapsack — produces intuitive, priority-ordered results that match how a human would plan their day, even if it doesn't maximize total scheduled time.
+
